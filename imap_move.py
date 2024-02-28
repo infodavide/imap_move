@@ -1,19 +1,18 @@
 #!/usr/bin/python
-# -*- coding: utf-*-
-
+# -*- coding: utf-8-
+"""
+Move message from one folder to another one in a targeted mailbox
+"""
 import argparse
 import atexit
-import os
 import signal
-import time
-import email
 import imaplib
 import logging
 import os
 import pathlib
+import sys
 import xml.etree.ElementTree as etree
 from logging.handlers import RotatingFileHandler
-from imaplib import IMAP4, IMAP4_SSL
 
 __author__ = 'David Rolland, contact@infodavid.org'
 __copyright__ = 'Copyright © 2023 David Rolland'
@@ -22,19 +21,27 @@ __license__ = 'MIT'
 IMAP4_PORT: int = 143
 
 
-class ObjectView(object):
+class _ObjectView:
+    """
+    Wrapper of the object
+    """
+
     def __init__(self, d):
+        """
+        Initialize
+        :param d: the data
+        """
         self.__dict__ = d
 
-    """ Returns the string representation of the view """
     def __str__(self) -> str:
+        """ Returns the string representation of the view """
         return str(self.__dict__)
 
 
-class ImapSettings(object):
+class ImapSettings:
     """
-        IMAP Settings.
-        """
+    IMAP Settings.
+    """
     server: str = None  # Full name or IP address of your IMAP server
     use_ssl: bool = False  # Set True to use SSL for the IMAP server
     port: int = IMAP4_PORT  # Port of your IMAP server
@@ -44,6 +51,11 @@ class ImapSettings(object):
     trash: str = None  # The trash folder of your IMAP server
 
     def parse(self, node: etree.Element, accounts: {}) -> None:
+        """
+        Parse XML
+        :param node: the node
+        :param accounts: the accounts
+        """
         self.server = node.get('server')
         v = node.get('port')
         if v is not None:
@@ -68,7 +80,7 @@ class ImapSettings(object):
             self.password = account[1]
 
 
-class Settings(object):
+class Settings:
     """
     Settings used by the IMAP deletion.
     """
@@ -82,7 +94,7 @@ class Settings(object):
         """
         Parse the XML configuration.
         """
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             tree = etree.parse(f)
         root_node: etree.Element = tree.getroot()
         log_node: etree.Element = root_node.find('log')
@@ -117,7 +129,7 @@ class Settings(object):
 
 def create_rotating_log(path: str, level: str) -> logging.Logger:
     """
-    Create the logger with file rotation.
+    Create the logger with file rotation
     :param path: the path of the main log file
     :param level: the log level as defined in logging module
     :return: the logger
@@ -127,7 +139,8 @@ def create_rotating_log(path: str, level: str) -> logging.Logger:
     if not os.path.exists(path_obj.parent.absolute()):
         os.makedirs(path_obj.parent.absolute())
     if os.path.exists(path):
-        open(path, 'w').close()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.close()
     else:
         path_obj.touch()
     # noinspection Spellchecker
@@ -147,30 +160,37 @@ def create_rotating_log(path: str, level: str) -> logging.Logger:
 
 
 def cleanup() -> None:
-    global logger
+    """
+    Cleanup the instances and session
+    """
     logger.log(logging.INFO, "Cleaning...")
     if 'source_mailbox' in globals():
-        global source_mailbox
         if 'logger' in globals():
-            logger.log(logging.INFO, 'Source IMAP session state: %s' % source_mailbox.state)
-        if 'SELECTED' == source_mailbox.state:
+            logger.info('Source IMAP session state: %s', source_mailbox.state)
+        if source_mailbox.state == 'SELECTED':
             logger.log(logging.DEBUG, 'Closing...')
             source_mailbox.expunge()
             source_mailbox.close()
             source_mailbox.logout()
     if 'target_mailbox' in globals():
-        global target_mailbox
         if 'logger' in globals():
-            logger.log(logging.INFO, 'Target IMAP session state: %s' % target_mailbox.state)
-        if 'SELECTED' == target_mailbox.state:
+            logger.info('Target IMAP session state: %s', target_mailbox.state)
+        if target_mailbox.state == 'SELECTED':
             logger.log(logging.DEBUG, 'Closing...')
             target_mailbox.expunge()
             target_mailbox.close()
             target_mailbox.logout()
 
 
+# pylint: disable=missing-type-doc
 def signal_handler(sig=None, frame=None) -> None:
+    """
+    Trigger the cleanup when program is exited
+    :param sig: the signal
+    :param frame: the frame
+    """
     cleanup()
+# pylint: enable=missing-type-doc
 
 
 parser = argparse.ArgumentParser(prog='imap_move.py', description='Move messages from IMAP server to another one')
@@ -196,17 +216,17 @@ settings.log_path = LOG_PATH
 settings.log_level = LOG_LEVEL
 settings.parse(os.path.abspath(CONFIG_PATH))
 logger = create_rotating_log(settings.log_path, settings.log_level)
-logger.log(logging.INFO, 'Using arguments: %s' % repr(args))
+logger.info('Using arguments: %s', repr(args))
 
 if not args.f or not os.path.isfile(args.f):
     print('Input file is required and must be valid.')
-    exit(1)
+    sys.exit(1)
 
 LOCK_PATH: str = os.path.abspath(os.path.dirname(CONFIG_PATH)) + os.sep + '.imap_move.lck'
-logger.log(logging.INFO, 'Log level set to: %s' % logging.getLevelName(logger.level))
+logger.info('Log level set to: %s', logging.getLevelName(logger.level))
 atexit.register(signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
-logger.log(logging.INFO, 'Connecting to source server: %s:%s with user: %s' % (settings.source_server.server, str(settings.source_server.port), settings.source_server.user))
+logger.info('Connecting to source server: %s:%s with user: %s', settings.source_server.server, str(settings.source_server.port), settings.source_server.user)
 
 if settings.source_server.use_ssl:
     source_mailbox = imaplib.IMAP4_SSL(host=settings.source_server.server, port=settings.source_server.port)
@@ -222,7 +242,7 @@ if logger.isEnabledFor(logging.DEBUG):
         buffer += (p[0] + " = " + p[1]) + '\n'
     logger.log(logging.DEBUG, buffer)
 
-logger.log(logging.INFO, 'Connecting to target server: %s:%s with user: %s' % (settings.target_server.server, str(settings.target_server.port), settings.target_server.user))
+logger.info('Connecting to target server: %s:%s with user: %s', settings.target_server.server, str(settings.target_server.port), settings.target_server.user)
 
 if settings.target_server.use_ssl:
     target_mailbox = imaplib.IMAP4_SSL(host=settings.target_server.server, port=settings.target_server.port)
@@ -237,32 +257,32 @@ if logger.isEnabledFor(logging.DEBUG):
         p = i.decode().split(' "/" ')
         buffer += (p[0] + " = " + p[1]) + '\n'
     logger.log(logging.DEBUG, buffer)
-logger.log(logging.INFO, 'Selecting folder on source: %s' % settings.source_server.folder)
+logger.info('Selecting folder on source: %s', settings.source_server.folder)
 source_mailbox.select(settings.source_server.folder)
-logger.log(logging.INFO, 'Selecting folder on target: %s' % settings.target_server.folder)
+logger.info('Selecting folder on target: %s', settings.target_server.folder)
 target_mailbox.select(settings.target_server.folder)
 typ, data = source_mailbox.search(None, 'ALL')
 count: int = 0
 
 for num in data[0].split():
-    logger.log(logging.INFO, 'Fetching message: %s' % str(num))
+    logger.info('Fetching message: %s', str(num))
     resp, data = source_mailbox.fetch(num, "(FLAGS INTERNALDATE BODY.PEEK[])")
     message = data[0][1]
     logger.log(logging.DEBUG, 'Retrieving flags')
-    flags = list()
+    flags = []
     for flag in imaplib.ParseFlags(data[0][0]):
         flags.append(flag.decode())
     flag_str = ' '.join(flags)
-    logger.log(logging.DEBUG, 'Retrieving internal date')
+    logger.debug('Retrieving internal date')
     date = imaplib.Time2Internaldate(imaplib.Internaldate2tuple(data[0][0]))
-    logger.log(logging.DEBUG, 'Moving message to folder: %s' % settings.target_server.folder)
+    logger.debug('Moving message to folder: %s', settings.target_server.folder)
     append_result = target_mailbox.append(settings.target_server.folder, flag_str, date, message)
 
     if append_result and len(append_result) > 0 and str(append_result[0]).upper() == 'OK':
         count = count + 1
         source_mailbox.store(num, '+FLAGS', '\\Deleted')
 
-logger.log(logging.INFO, '%s messages moved' % str(count))
+logger.info('%s messages moved', str(count))
 source_mailbox.select(settings.source_server.trash)  # select trash
 source_mailbox.store("1:*", '+FLAGS', '\\Deleted')  # flag all trash as Deleted
-exit(0)
+sys.exit(0)
